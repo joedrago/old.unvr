@@ -1,25 +1,83 @@
 fs = require 'fs'
 {spawnSync} = require 'child_process'
 
-SINGLE_DURATION = 3
+DEFAULT_OUTPUT_WIDTH = 1920
+DEFAULT_OUTPUT_HEIGHT = 1080
+DEFAULT_FPS = 30
+DEFAULT_FOV = 110
+DEFAULT_CRF = 20
+DEFAULT_WALK_DIR = "unvr.snapshots"
+
+pad = (num, size) ->
+  s = num + ""
+  while s.length < size
+    s = "0" + s
+  return s
+
+syntax = ->
+  console.log "Syntax : unvr [options] inputFilename outputFilename"
+  console.log "Options:"
+  console.log "    -sw WIDTH   : source video width (one eye) REQUIRED"
+  console.log "    -sh HEIGHT  : source video height (one eye) REQUIRED"
+  console.log "    -dw WIDTH   : dest video width (default: #{DEFAULT_OUTPUT_WIDTH})"
+  console.log "    -dh HEIGHT  : dest video height (default: #{DEFAULT_OUTPUT_HEIGHT})"
+  console.log "    -l T:Y:P:R  : At timestamp T, look in a new direction (Yaw, Pitch, Roll, in degrees). 0:0:0 is straight ahead"
+  console.log "    -t DURATION : test the last look by making a no-sound output of DURATION seconds for it"
+  console.log "    -j JOBS     : number of jobs (cores) ffmpeg is allowed to use"
+  console.log "    -f FPS      : frames per second. Default: #{DEFAULT_FPS}"
+  console.log "    -v FOV      : field of view, in degrees. Default: #{DEFAULT_FOV}"
+  console.log "    -q QUALITY  : quality (passed directly to ffmpeg as -crf). Default: #{DEFAULT_CRF}"
+  console.log "    -w S:D:STEP : Instead of making a video, walk the video making snapshots every STEP seconds: S start, D duration"
+  console.log "    -wd DIR     : walk snapshots dir (default: #{DEFAULT_WALK_DIR})"
+  console.log "    -d          : dry run (don't execute commands or touch files)"
 
 main = ->
   args = process.argv.slice(2)
+
+  if args.length < 1
+    syntax()
+    process.exit(0)
+
   inputFilename = null
   outputFilename = null
   srcW = 0
   srcH = 0
-  dstW = 1920
-  dstH = 1080
-  single = false
-  cores = 0
+  dstW = DEFAULT_OUTPUT_WIDTH
+  dstH = DEFAULT_OUTPUT_HEIGHT
+  testLookDuration = 0
+  jobs = 0
+  dryrun = false
+  fps = DEFAULT_FPS
+  fov = DEFAULT_FOV
+  crf = DEFAULT_CRF
+  walkSnapshots = null
+  walkDir = DEFAULT_WALK_DIR
 
   looks = []
   while arg = args.shift()
-    if arg == '-s'
-      single = true
-    else if arg == '-c'
-      cores = parseInt(args.shift())
+    if arg == '-d'
+      dryrun = true
+    else if arg == '-w'
+      rawSS = args.shift()
+      pieces = rawSS.split(/:/) # Timestamp, Yaw, Pitch, Roll
+      while pieces.length < 3
+        pieces.push "1"
+      walkSnapshots =
+        start: parseInt(pieces[0])
+        duration: parseInt(pieces[1])
+        step: parseInt(pieces[2])
+    else if arg == '-wd'
+      walkDir = args.shift()
+    else if arg == '-j'
+      jobs = parseInt(args.shift())
+    else if arg == '-f'
+      fps = parseInt(args.shift())
+    else if arg == '-v'
+      fov = parseInt(args.shift())
+    else if arg == '-q'
+      crf = parseInt(args.shift())
+    else if arg == '-t'
+      testLookDuration = parseInt(args.shift())
     else if arg == '-sw'
       srcW = parseInt(args.shift())
     else if arg == '-sh'
@@ -48,17 +106,16 @@ main = ->
       else
         outputFilename = arg
 
-  if single
+  if testLookDuration > 0
     if looks.length > 1
       looks = [looks[looks.length-1]]
-
   else
     looks.sort (a, b) -> return b.timestamp < a.timestamp
 
   needsStartingLook = false
   if looks.length == 0
     needsStartingLook = true
-  else if not single and (looks[0].timestamp != 0)
+  else if (testLookDuration == 0) and (looks[0].timestamp != 0)
     needsStartingLook = true
   if needsStartingLook
     startingLook =
@@ -75,7 +132,26 @@ main = ->
   console.log "Reading [#{srcW}x#{srcH}]: #{inputFilename}"
   console.log "Writing [#{dstW}x#{dstH}]: #{outputFilename}"
   console.log "Looks:"
-  console.log looks
+  for look in looks
+    console.log " * T:#{look.timestamp} Y:#{look.yaw} P:#{look.pitch} R:#{look.roll}"
+
+  if walkSnapshots != null
+    oldLooks = looks
+    looks = []
+    end = walkSnapshots.start + walkSnapshots.duration
+    for timestamp in [walkSnapshots.start..end] by walkSnapshots.step
+      lastOldLook = oldLooks[0]
+      for oldLook in oldLooks
+        if timestamp < oldLook.timestamp
+          break
+        lastOldLook = oldLook
+      looks.push {
+        timestamp: timestamp
+        roll:  lastOldLook.roll
+        pitch: lastOldLook.pitch
+        yaw:   lastOldLook.yaw
+      }
+
 
   # make a working dir
   try
@@ -83,91 +159,142 @@ main = ->
   catch
     # meh
 
+  if walkSnapshots != null
+    try
+      fs.mkdirSync walkDir
+    catch
+      # meh
+
   # make a fake file to indicate to nona the source video's dimensions
   coloristEXE = __dirname + "/wbin/colorist.exe"
   fakeSourceImageFilename = "unvr.tmp/lies.png"
-  spawnSync(coloristEXE, ["generate", "#{srcW}x#{srcH},#000000", fakeSourceImageFilename])#, { stdio: 'inherit' })
+  if not dryrun
+    spawnSync(coloristEXE, ["generate", "#{srcW}x#{srcH},#000000", fakeSourceImageFilename])
 
-  ffmpegArgs = []
-
-  if cores > 0
-    ffmpegArgs.push '-threads'
-    ffmpegArgs.push String(cores)
-
-  seekOffset = 0
-  if single
-    seconds = looks[0].timestamp - 1
-    if seconds > 0
-      seekOffset = seconds
-      ffmpegArgs.push '-ss'
-      ffmpegArgs.push String(seekOffset)
-
-  ffmpegArgs.push '-i'
-  ffmpegArgs.push inputFilename
-  ffmpegFilter = ""
-
-  nonaEXE = __dirname + "/wbin/nona.exe"
-  for look, lookIndex in looks
-    # write out a nona config for creating the equirectangular -> rectilinear x/y projection remaps
-    console.log "Generating projection for look #{lookIndex} ..."
-    nonaConfig = "p w#{dstW} h#{dstH} f0 v100\ni f4 r#{look.roll} p#{look.pitch} y#{look.yaw} v180 n\"lies.png\"\n"
-    nonaConfigFilename = "unvr.tmp/nona#{lookIndex}.cfg"
-    fs.writeFileSync(nonaConfigFilename, nonaConfig)
-    spawnSync(nonaEXE, ['-o', "unvr.tmp\\r#{lookIndex}_", '-c', nonaConfigFilename])
-
-    ffmpegArgs.push '-i'
-    ffmpegArgs.push "unvr.tmp\\r#{lookIndex}_0000_x.tif"
-    ffmpegArgs.push '-i'
-    ffmpegArgs.push "unvr.tmp\\r#{lookIndex}_0000_y.tif"
-
-    lastLook = (lookIndex == (looks.length-1))
-    duration = 0
-    if not lastLook
-      duration = looks[lookIndex+1].timestamp - look.timestamp
-    if single
-      duration = SINGLE_DURATION
-    if duration > 0
-      ffmpegFilter += "[0:v]trim=start=#{look.timestamp - seekOffset}:duration=#{duration},setpts=PTS-STARTPTS[raw#{lookIndex}];"
-    else
-      ffmpegFilter += "[0:v]trim=start=#{look.timestamp - seekOffset},setpts=PTS-STARTPTS[raw#{lookIndex}];"
-
-    if single
-      break
-
-  concatString = ""
-  projIndex = 1
-  for look, lookIndex in looks
-    if single
-      ffmpegFilter += "[raw#{lookIndex}][#{projIndex}][#{projIndex+1}]remap"
-      break
-    ffmpegFilter += "[raw#{lookIndex}][#{projIndex}][#{projIndex+1}]remap[r#{lookIndex}];"
-    projIndex += 2
-    concatString += "[r#{lookIndex}]"
-
-  if not single
-    concatString += "concat=n=#{looks.length}"
-    ffmpegFilter += concatString
-
-  ffmpegArgs.push "-filter_complex"
-  ffmpegArgs.push ffmpegFilter
-  ffmpegArgs.push '-c:a'
-  ffmpegArgs.push 'copy'
-  ffmpegArgs.push '-shortest'
-  if outputFilename.match(/\.png$/)
-    ffmpegArgs.push '-frames:v'
-    ffmpegArgs.push '1'
-  else
-    ffmpegArgs.push '-vb'
-    ffmpegArgs.push '20M'
-  ffmpegArgs.push outputFilename
-
-  console.log ffmpegArgs
+  onePass = (looks.length == 1) and ((looks[0].timestamp == 0) or (testLookDuration != 0))
 
   ffmpegEXE = __dirname + "/wbin/ffmpeg.exe"
-  try
-    fs.unlinkSync(outputFilename)
-  catch
-    # meh
-  spawnSync(ffmpegEXE, ffmpegArgs, { stdio: 'inherit' })
+  nonaEXE = __dirname + "/wbin/nona.exe"
+  lastLook = null
+  for look, lookIndex in looks
+    if walkSnapshots == null
+      look.filename = "unvr.tmp\\tmp_#{lookIndex}.mp4"
+    else
+      look.filename = "#{walkDir}\\T#{pad(look.timestamp, 6)}.png"
+
+    if (lastLook == null) or (lastLook.yaw != look.yaw) or (lastLook.pitch != look.pitch) or (lastLook.roll != look.roll)
+      lastLook = look
+
+      # write out a nona config for creating the equirectangular -> rectilinear x/y projection remaps
+      nonaConfig = "p w#{dstW} h#{dstH} f0 v#{fov}\ni f4 r#{look.roll} p#{look.pitch} y#{look.yaw} v180 n\"lies.png\"\n"
+      nonaConfigFilename = "unvr.tmp/nona.cfg"
+      nonaArgs = ['-o', "unvr.tmp\\unvr_", '-c', nonaConfigFilename]
+      console.log "Generating projection for look #{lookIndex} ..."
+      console.log nonaConfig
+      console.log nonaArgs
+      if not dryrun
+        fs.writeFileSync(nonaConfigFilename, nonaConfig)
+        spawnSync(nonaEXE, nonaArgs)
+
+    ffmpegArgs = []
+    if jobs > 0
+      ffmpegArgs.push '-threads'
+      ffmpegArgs.push String(jobs)
+
+    # This makes ffmpeg significantly faster at finding the first frame
+    seekOffset = 0
+    seconds = look.timestamp
+    seekOffset = seconds
+    ffmpegArgs.push '-ss'
+    ffmpegArgs.push String(seekOffset)
+
+    ffmpegArgs.push '-i'
+    ffmpegArgs.push inputFilename
+    ffmpegArgs.push '-i'
+    ffmpegArgs.push "unvr.tmp\\unvr_0000_x.tif"
+    ffmpegArgs.push '-i'
+    ffmpegArgs.push "unvr.tmp\\unvr_0000_y.tif"
+
+    ffmpegFilter = ""
+
+    duration = 0
+    if lookIndex != (looks.length - 1)
+      duration = looks[lookIndex+1].timestamp - look.timestamp
+    if testLookDuration > 0
+      duration = testLookDuration
+
+    if duration > 0
+      ffmpegFilter += "[0:v]trim=start=#{look.timestamp - seekOffset}:duration=#{duration},fps=#{fps},setpts=PTS-STARTPTS[raw#{lookIndex}];"
+    else
+      ffmpegFilter += "[0:v]trim=start=#{look.timestamp - seekOffset},fps=#{fps},setpts=PTS-STARTPTS[raw#{lookIndex}];"
+
+    ffmpegFilter += "[raw#{lookIndex}][1][2]remap"
+
+    ffmpegArgs.push "-filter_complex"
+    ffmpegArgs.push ffmpegFilter
+    if onePass and (testLookDuration == 0) and (walkSnapshots == null)
+      ffmpegArgs.push '-c:a'
+      ffmpegArgs.push 'copy'
+      ffmpegArgs.push '-shortest'
+    else
+      ffmpegArgs.push '-an'
+
+    filename = look.filename
+    if onePass
+      filename = outputFilename
+
+    if filename.match(/\.png$/)
+      ffmpegArgs.push '-frames:v'
+      ffmpegArgs.push '1'
+    else
+      ffmpegArgs.push '-crf'
+      ffmpegArgs.push String(crf)
+
+    ffmpegArgs.push filename
+
+    console.log "Rendering look #{lookIndex} ..."
+    console.log ffmpegArgs
+    if not dryrun
+      try
+        fs.unlinkSync(filename)
+      catch
+        # meh
+      spawnSync(ffmpegEXE, ffmpegArgs, { stdio: 'inherit' })
+
+    if testLookDuration > 0
+      break
+
+  if not onePass and (walkSnapshots == null)
+    console.log "Concatenating #{looks.length} streams ..."
+    ffmpegArgs = []
+    if jobs > 0
+      ffmpegArgs.push '-threads'
+      ffmpegArgs.push String(jobs)
+
+    ffmpegArgs.push '-i'
+    ffmpegArgs.push inputFilename
+
+    ffmpegFilter = ""
+    concatString = ""
+    for look, lookIndex in looks
+      ffmpegArgs.push '-i'
+      ffmpegArgs.push look.filename
+      ffmpegFilter += "[#{lookIndex+1}:v]"
+    ffmpegFilter += "concat=n=#{looks.length}"
+
+    ffmpegArgs.push "-filter_complex"
+    ffmpegArgs.push ffmpegFilter
+    ffmpegArgs.push '-c:a'
+    ffmpegArgs.push 'copy'
+    ffmpegArgs.push outputFilename
+
+    console.log ffmpegArgs
+
+    if not dryrun
+      try
+        fs.unlinkSync(outputFilename)
+      catch
+        # meh
+      spawnSync(ffmpegEXE, ffmpegArgs, { stdio: 'inherit' })
 
 main()
