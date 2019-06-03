@@ -1,0 +1,25 @@
+{
+  "name": "unvr",
+  "description": "Convert VR videos to 2D",
+  "keywords": [
+    "video",
+    "vr",
+    "360video"
+  ],
+  "author": "Joe Drago",
+  "version": "0.0.1",
+  "bin": {
+    "unvr": "./unvr"
+  },
+  "homepage": "https://github.com/joedrago/unvr",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/joedrago/unvr.git"
+  },
+  "scripts": {
+    "build": "cake build"
+  },
+  "devDependencies": {
+    "coffeescript": "^2.4.1"
+  }
+}
