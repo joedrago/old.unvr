@@ -38,6 +38,7 @@ main = ->
     syntax()
     process.exit(0)
 
+  # defaults
   inputFilename = null
   outputFilename = null
   srcW = 0
@@ -53,6 +54,7 @@ main = ->
   walkSnapshots = null
   walkDir = DEFAULT_WALK_DIR
 
+  # argument parsing
   looks = []
   while arg = args.shift()
     if arg == '-d'
@@ -153,12 +155,11 @@ main = ->
       }
 
 
-  # make a working dir
+  # make a working dir and optionally a walk dir
   try
     fs.mkdirSync "unvr.tmp"
   catch
     # meh
-
   if walkSnapshots != null
     try
       fs.mkdirSync walkDir
@@ -265,31 +266,53 @@ main = ->
       break
 
   if not onePass and (walkSnapshots == null)
-    console.log "Concatenating #{looks.length} streams ..."
+    console.log "Concatenating #{looks.length} video streams ..."
     ffmpegArgs = []
     if jobs > 0
       ffmpegArgs.push '-threads'
       ffmpegArgs.push String(jobs)
-
-    ffmpegArgs.push '-i'
-    ffmpegArgs.push inputFilename
-
     ffmpegFilter = ""
     concatString = ""
+    filelist = ""
+    filelistFilename = "unvr.tmp\\concatFileList.txt"
+    concatFilename = "unvr.tmp\\allvideo.mp4"
     for look, lookIndex in looks
-      ffmpegArgs.push '-i'
-      ffmpegArgs.push look.filename
-      ffmpegFilter += "[#{lookIndex+1}:v]"
-    ffmpegFilter += "concat=n=#{looks.length}"
-
-    ffmpegArgs.push "-filter_complex"
-    ffmpegArgs.push ffmpegFilter
-    ffmpegArgs.push '-c:a'
+      filelist += "file '#{look.filename}'\n"
+    fs.writeFileSync(filelistFilename, filelist)
+    ffmpegArgs.push '-f'
+    ffmpegArgs.push 'concat'
+    ffmpegArgs.push '-safe'
+    ffmpegArgs.push '0'
+    ffmpegArgs.push '-i'
+    ffmpegArgs.push filelistFilename
+    ffmpegArgs.push '-c'
     ffmpegArgs.push 'copy'
-    ffmpegArgs.push outputFilename
-
+    ffmpegArgs.push concatFilename
     console.log ffmpegArgs
+    if not dryrun
+      try
+        fs.unlinkSync(concatFilename)
+      catch
+        # meh
+      spawnSync(ffmpegEXE, ffmpegArgs, { stdio: 'inherit' })
 
+    console.log "Mixing video and audio streams ..."
+    ffmpegArgs = []
+    if jobs > 0
+      ffmpegArgs.push '-threads'
+      ffmpegArgs.push String(jobs)
+    ffmpegArgs.push '-i'
+    ffmpegArgs.push concatFilename
+    ffmpegArgs.push '-i'
+    ffmpegArgs.push inputFilename
+    ffmpegArgs.push '-c'
+    ffmpegArgs.push 'copy'
+    ffmpegArgs.push '-map'
+    ffmpegArgs.push '0:v:0'
+    ffmpegArgs.push '-map'
+    ffmpegArgs.push '1:a:0'
+    ffmpegArgs.push outputFilename
+    console.log ffmpegArgs
     if not dryrun
       try
         fs.unlinkSync(outputFilename)
