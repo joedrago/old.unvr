@@ -111,6 +111,10 @@ main = ->
   if testLookDuration > 0
     if looks.length > 1
       looks = [looks[looks.length-1]]
+    if looks.length > 0
+      if walkSnapshots != null
+        looks[0].timestamp = walkSnapshots.start
+        walkSnapshots = null
   else
     looks.sort (a, b) -> return b.timestamp < a.timestamp
 
