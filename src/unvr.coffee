@@ -153,16 +153,14 @@ main = ->
     looks = []
     end = walkSnapshots.start + 10000 # arbitrary
     for timestamp in [walkSnapshots.start..end] by walkSnapshots.step
-      lastOldLook = oldLooks[0]
       for oldLook in oldLooks
-        if timestamp < oldLook.timestamp
+        if timestamp <= oldLook.timestamp
           break
-        lastOldLook = oldLook
       looks.push {
         timestamp: timestamp
-        roll:  lastOldLook.roll
-        pitch: lastOldLook.pitch
-        yaw:   lastOldLook.yaw
+        roll:  oldLook.roll
+        pitch: oldLook.pitch
+        yaw:   oldLook.yaw
       }
 
 

@@ -50,7 +50,7 @@
   };
 
   main = function() {
-    var arg, args, coloristEXE, concatFilename, concatString, crf, dryrun, dstH, dstW, duration, end, fakeSourceImageFilename, ffmpegArgs, ffmpegEXE, ffmpegFilter, filelist, filelistFilename, filename, filesToUnlink, fn, fov, fps, i, inputFilename, j, jobs, k, l, lastLook, lastOldLook, len, len1, len2, len3, len4, look, lookIndex, looks, m, n, needsStartingLook, nonaArgs, nonaConfig, nonaConfigFilename, nonaEXE, oldLook, oldLooks, onePass, outputFilename, pieces, rawSS, rawYPR, ref, ref1, ref2, seconds, seekOffset, srcH, srcW, startingLook, testLookDuration, timestamp, toUnlink, walkCleanup, walkDir, walkSnapshots;
+    var arg, args, coloristEXE, concatFilename, concatString, crf, dryrun, dstH, dstW, duration, end, fakeSourceImageFilename, ffmpegArgs, ffmpegEXE, ffmpegFilter, filelist, filelistFilename, filename, filesToUnlink, fn, fov, fps, i, inputFilename, j, jobs, k, l, lastLook, len, len1, len2, len3, len4, look, lookIndex, looks, m, n, needsStartingLook, nonaArgs, nonaConfig, nonaConfigFilename, nonaEXE, oldLook, oldLooks, onePass, outputFilename, pieces, rawSS, rawYPR, ref, ref1, ref2, seconds, seekOffset, srcH, srcW, startingLook, testLookDuration, timestamp, toUnlink, walkCleanup, walkDir, walkSnapshots;
     args = process.argv.slice(2);
     if (args.length < 1) {
       syntax();
@@ -183,19 +183,17 @@
       looks = [];
       end = walkSnapshots.start + 10000; // arbitrary
       for (timestamp = j = ref = walkSnapshots.start, ref1 = end, ref2 = walkSnapshots.step; ref2 !== 0 && (ref2 > 0 ? j <= ref1 : j >= ref1); timestamp = j += ref2) {
-        lastOldLook = oldLooks[0];
         for (k = 0, len1 = oldLooks.length; k < len1; k++) {
           oldLook = oldLooks[k];
-          if (timestamp < oldLook.timestamp) {
+          if (timestamp <= oldLook.timestamp) {
             break;
           }
-          lastOldLook = oldLook;
         }
         looks.push({
           timestamp: timestamp,
-          roll: lastOldLook.roll,
-          pitch: lastOldLook.pitch,
-          yaw: lastOldLook.yaw
+          roll: oldLook.roll,
+          pitch: oldLook.pitch,
+          yaw: oldLook.yaw
         });
       }
     }
