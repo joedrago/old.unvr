@@ -19,6 +19,7 @@ syntax = ->
   console.log "Options:"
   console.log "    -sw WIDTH   : source video width (one eye) REQUIRED"
   console.log "    -sh HEIGHT  : source video height (one eye) REQUIRED"
+  console.log "    -s DIM      : short for -sw DIM -sh DIM"
   console.log "    -dw WIDTH   : dest video width (default: #{DEFAULT_OUTPUT_WIDTH})"
   console.log "    -dh HEIGHT  : dest video height (default: #{DEFAULT_OUTPUT_HEIGHT})"
   console.log "    -l T:Y:P:R  : At timestamp T, look in a new direction (Yaw, Pitch, Roll, in degrees). 0:0:0 is straight ahead"
@@ -27,8 +28,9 @@ syntax = ->
   console.log "    -f FPS      : frames per second. Default: #{DEFAULT_FPS}"
   console.log "    -v FOV      : field of view, in degrees. Default: #{DEFAULT_FOV}"
   console.log "    -q QUALITY  : quality (passed directly to ffmpeg as -crf). Default: #{DEFAULT_CRF}"
-  console.log "    -w S:D:STEP : Instead of making a video, walk the video making snapshots every STEP seconds: S start, D duration"
+  console.log "    -w S:STEP   : Instead of making a video, walk the video making snapshots every STEP seconds: S start"
   console.log "    -wd DIR     : walk snapshots dir (default: #{DEFAULT_WALK_DIR})"
+  console.log "    -wc         : cleanup any old snapshots in walk snapshots dir before adding any"
   console.log "    -d          : dry run (don't execute commands or touch files)"
 
 main = ->
@@ -53,6 +55,7 @@ main = ->
   crf = DEFAULT_CRF
   walkSnapshots = null
   walkDir = DEFAULT_WALK_DIR
+  walkCleanup = false
 
   # argument parsing
   looks = []
@@ -62,12 +65,11 @@ main = ->
     else if arg == '-w'
       rawSS = args.shift()
       pieces = rawSS.split(/:/) # Timestamp, Yaw, Pitch, Roll
-      while pieces.length < 3
+      while pieces.length < 2
         pieces.push "1"
       walkSnapshots =
         start: parseInt(pieces[0])
-        duration: parseInt(pieces[1])
-        step: parseInt(pieces[2])
+        step: parseInt(pieces[1])
     else if arg == '-wd'
       walkDir = args.shift()
     else if arg == '-j'
@@ -80,6 +82,9 @@ main = ->
       crf = parseInt(args.shift())
     else if arg == '-t'
       testLookDuration = parseInt(args.shift())
+    else if arg == '-s'
+      srcW = parseInt(args.shift())
+      srcH = srcW
     else if arg == '-sw'
       srcW = parseInt(args.shift())
     else if arg == '-sh'
@@ -88,6 +93,8 @@ main = ->
       dstW = parseInt(args.shift())
     else if arg == '-dh'
       dstH = parseInt(args.shift())
+    else if arg == '-wc'
+      walkCleanup = true
     else if arg == '-l' # look
       rawYPR = args.shift()
       pieces = rawYPR.split(/:/) # Timestamp, Yaw, Pitch, Roll
@@ -144,7 +151,7 @@ main = ->
   if walkSnapshots != null
     oldLooks = looks
     looks = []
-    end = walkSnapshots.start + walkSnapshots.duration
+    end = walkSnapshots.start + 10000 # arbitrary
     for timestamp in [walkSnapshots.start..end] by walkSnapshots.step
       lastOldLook = oldLooks[0]
       for oldLook in oldLooks
@@ -170,6 +177,17 @@ main = ->
     catch
       # meh
 
+    if not dryrun and walkCleanup
+      filesToUnlink = fs.readdirSync(walkDir)
+      for fn in filesToUnlink
+        if fn.match(/.tga$/)
+          toUnlink = "#{walkDir}/#{fn}"
+          try
+            console.log "Removing: #{toUnlink}"
+            fs.unlinkSync(toUnlink)
+          catch
+            # meh
+
   # make a fake file to indicate to nona the source video's dimensions
   coloristEXE = __dirname + "/wbin/colorist.exe"
   fakeSourceImageFilename = "unvr.tmp/lies.png"
@@ -185,7 +203,7 @@ main = ->
     if walkSnapshots == null
       look.filename = "unvr.tmp\\tmp_#{lookIndex}.mp4"
     else
-      look.filename = "#{walkDir}\\T#{pad(look.timestamp, 6)}.png"
+      look.filename = "#{walkDir}\\T#{pad(look.timestamp, 6)}.tga"
 
     if (lastLook == null) or (lastLook.yaw != look.yaw) or (lastLook.pitch != look.pitch) or (lastLook.roll != look.roll)
       lastLook = look
@@ -248,7 +266,7 @@ main = ->
     if onePass
       filename = outputFilename
 
-    if filename.match(/\.png$/)
+    if filename.match(/\.tga$/)
       ffmpegArgs.push '-frames:v'
       ffmpegArgs.push '1'
     else
@@ -265,6 +283,8 @@ main = ->
       catch
         # meh
       spawnSync(ffmpegEXE, ffmpegArgs, { stdio: 'inherit' })
+      if not fs.existsSync(filename)
+        break
 
     if testLookDuration > 0
       break

@@ -34,6 +34,7 @@
     console.log("Options:");
     console.log("    -sw WIDTH   : source video width (one eye) REQUIRED");
     console.log("    -sh HEIGHT  : source video height (one eye) REQUIRED");
+    console.log("    -s DIM      : short for -sw DIM -sh DIM");
     console.log(`    -dw WIDTH   : dest video width (default: ${DEFAULT_OUTPUT_WIDTH})`);
     console.log(`    -dh HEIGHT  : dest video height (default: ${DEFAULT_OUTPUT_HEIGHT})`);
     console.log("    -l T:Y:P:R  : At timestamp T, look in a new direction (Yaw, Pitch, Roll, in degrees). 0:0:0 is straight ahead");
@@ -42,13 +43,14 @@
     console.log(`    -f FPS      : frames per second. Default: ${DEFAULT_FPS}`);
     console.log(`    -v FOV      : field of view, in degrees. Default: ${DEFAULT_FOV}`);
     console.log(`    -q QUALITY  : quality (passed directly to ffmpeg as -crf). Default: ${DEFAULT_CRF}`);
-    console.log("    -w S:D:STEP : Instead of making a video, walk the video making snapshots every STEP seconds: S start, D duration");
+    console.log("    -w S:STEP   : Instead of making a video, walk the video making snapshots every STEP seconds: S start");
     console.log(`    -wd DIR     : walk snapshots dir (default: ${DEFAULT_WALK_DIR})`);
+    console.log("    -wc         : cleanup any old snapshots in walk snapshots dir before adding any");
     return console.log("    -d          : dry run (don't execute commands or touch files)");
   };
 
   main = function() {
-    var arg, args, coloristEXE, concatFilename, concatString, crf, dryrun, dstH, dstW, duration, end, fakeSourceImageFilename, ffmpegArgs, ffmpegEXE, ffmpegFilter, filelist, filelistFilename, filename, fov, fps, i, inputFilename, j, jobs, k, l, lastLook, lastOldLook, len, len1, len2, len3, look, lookIndex, looks, m, needsStartingLook, nonaArgs, nonaConfig, nonaConfigFilename, nonaEXE, oldLook, oldLooks, onePass, outputFilename, pieces, rawSS, rawYPR, ref, ref1, ref2, seconds, seekOffset, srcH, srcW, startingLook, testLookDuration, timestamp, walkDir, walkSnapshots;
+    var arg, args, coloristEXE, concatFilename, concatString, crf, dryrun, dstH, dstW, duration, end, fakeSourceImageFilename, ffmpegArgs, ffmpegEXE, ffmpegFilter, filelist, filelistFilename, filename, filesToUnlink, fn, fov, fps, i, inputFilename, j, jobs, k, l, lastLook, lastOldLook, len, len1, len2, len3, len4, look, lookIndex, looks, m, n, needsStartingLook, nonaArgs, nonaConfig, nonaConfigFilename, nonaEXE, oldLook, oldLooks, onePass, outputFilename, pieces, rawSS, rawYPR, ref, ref1, ref2, seconds, seekOffset, srcH, srcW, startingLook, testLookDuration, timestamp, toUnlink, walkCleanup, walkDir, walkSnapshots;
     args = process.argv.slice(2);
     if (args.length < 1) {
       syntax();
@@ -69,6 +71,7 @@
     crf = DEFAULT_CRF;
     walkSnapshots = null;
     walkDir = DEFAULT_WALK_DIR;
+    walkCleanup = false;
     // argument parsing
     looks = [];
     while (arg = args.shift()) {
@@ -77,13 +80,12 @@
       } else if (arg === '-w') {
         rawSS = args.shift();
         pieces = rawSS.split(/:/); // Timestamp, Yaw, Pitch, Roll
-        while (pieces.length < 3) {
+        while (pieces.length < 2) {
           pieces.push("1");
         }
         walkSnapshots = {
           start: parseInt(pieces[0]),
-          duration: parseInt(pieces[1]),
-          step: parseInt(pieces[2])
+          step: parseInt(pieces[1])
         };
       } else if (arg === '-wd') {
         walkDir = args.shift();
@@ -97,6 +99,9 @@
         crf = parseInt(args.shift());
       } else if (arg === '-t') {
         testLookDuration = parseInt(args.shift());
+      } else if (arg === '-s') {
+        srcW = parseInt(args.shift());
+        srcH = srcW;
       } else if (arg === '-sw') {
         srcW = parseInt(args.shift());
       } else if (arg === '-sh') {
@@ -105,6 +110,8 @@
         dstW = parseInt(args.shift());
       } else if (arg === '-dh') {
         dstH = parseInt(args.shift());
+      } else if (arg === '-wc') {
+        walkCleanup = true;
       } else if (arg === '-l') { // look
         rawYPR = args.shift();
         pieces = rawYPR.split(/:/); // Timestamp, Yaw, Pitch, Roll
@@ -174,7 +181,7 @@
     if (walkSnapshots !== null) {
       oldLooks = looks;
       looks = [];
-      end = walkSnapshots.start + walkSnapshots.duration;
+      end = walkSnapshots.start + 10000; // arbitrary
       for (timestamp = j = ref = walkSnapshots.start, ref1 = end, ref2 = walkSnapshots.step; ref2 !== 0 && (ref2 > 0 ? j <= ref1 : j >= ref1); timestamp = j += ref2) {
         lastOldLook = oldLooks[0];
         for (k = 0, len1 = oldLooks.length; k < len1; k++) {
@@ -205,6 +212,22 @@
       } catch (error) {
 
       }
+      // meh
+      if (!dryrun && walkCleanup) {
+        filesToUnlink = fs.readdirSync(walkDir);
+        for (l = 0, len2 = filesToUnlink.length; l < len2; l++) {
+          fn = filesToUnlink[l];
+          if (fn.match(/.tga$/)) {
+            toUnlink = `${walkDir}/${fn}`;
+            try {
+              console.log(`Removing: ${toUnlink}`);
+              fs.unlinkSync(toUnlink);
+            } catch (error) {
+
+            }
+          }
+        }
+      }
     }
     // meh
 
@@ -218,12 +241,12 @@
     ffmpegEXE = __dirname + "/wbin/ffmpeg.exe";
     nonaEXE = __dirname + "/wbin/nona.exe";
     lastLook = null;
-    for (lookIndex = l = 0, len2 = looks.length; l < len2; lookIndex = ++l) {
+    for (lookIndex = m = 0, len3 = looks.length; m < len3; lookIndex = ++m) {
       look = looks[lookIndex];
       if (walkSnapshots === null) {
         look.filename = `unvr.tmp\\tmp_${lookIndex}.mp4`;
       } else {
-        look.filename = `${walkDir}\\T${pad(look.timestamp, 6)}.png`;
+        look.filename = `${walkDir}\\T${pad(look.timestamp, 6)}.tga`;
       }
       if ((lastLook === null) || (lastLook.yaw !== look.yaw) || (lastLook.pitch !== look.pitch) || (lastLook.roll !== look.roll)) {
         lastLook = look;
@@ -283,7 +306,7 @@
       if (onePass) {
         filename = outputFilename;
       }
-      if (filename.match(/\.png$/)) {
+      if (filename.match(/\.tga$/)) {
         ffmpegArgs.push('-frames:v');
         ffmpegArgs.push('1');
       } else {
@@ -303,6 +326,9 @@
         spawnSync(ffmpegEXE, ffmpegArgs, {
           stdio: 'inherit'
         });
+        if (!fs.existsSync(filename)) {
+          break;
+        }
       }
       if (testLookDuration > 0) {
         break;
@@ -320,7 +346,7 @@
       filelist = "";
       filelistFilename = "unvr.tmp\\concatFileList.txt";
       concatFilename = "unvr.tmp\\allvideo.mp4";
-      for (lookIndex = m = 0, len3 = looks.length; m < len3; lookIndex = ++m) {
+      for (lookIndex = n = 0, len4 = looks.length; n < len4; lookIndex = ++n) {
         look = looks[lookIndex];
         filelist += `file '${look.filename}'\n`;
       }
