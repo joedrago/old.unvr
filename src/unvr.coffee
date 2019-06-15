@@ -22,7 +22,7 @@ syntax = ->
   console.log "    -s DIM      : short for -sw DIM -sh DIM"
   console.log "    -dw WIDTH   : dest video width (default: #{DEFAULT_OUTPUT_WIDTH})"
   console.log "    -dh HEIGHT  : dest video height (default: #{DEFAULT_OUTPUT_HEIGHT})"
-  console.log "    -l T:Y:P:R  : At timestamp T, look in a new direction (Yaw, Pitch, Roll, in degrees). 0:0:0 is straight ahead"
+  console.log "    -l T:P:Y:R  : At timestamp T, look in a new direction (Pitch, Yaw, Roll, in degrees). 0:0:0 is straight ahead"
   console.log "    -t DURATION : test the last look by making a no-sound output of DURATION seconds for it"
   console.log "    -j JOBS     : number of jobs (cores) ffmpeg is allowed to use"
   console.log "    -f FPS      : frames per second. Default: #{DEFAULT_FPS}"
@@ -102,8 +102,8 @@ main = ->
         pieces.push "0"
       look =
         timestamp: parseInt(pieces[0])
-        yaw:   parseInt(pieces[1])
-        pitch: parseInt(pieces[2])
+        pitch: parseInt(pieces[1])
+        yaw:   parseInt(pieces[2])
         roll:  parseInt(pieces[3])
       looks.push look
     else
