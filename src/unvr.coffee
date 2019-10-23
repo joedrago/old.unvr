@@ -5,6 +5,7 @@ DEFAULT_OUTPUT_WIDTH = 1920
 DEFAULT_OUTPUT_HEIGHT = 1080
 DEFAULT_FPS = 30
 DEFAULT_FOV = 110
+DEFAULT_ROTATED_FOV = 60
 DEFAULT_CRF = 20
 DEFAULT_WALK_DIR = "unvr.snapshots"
 
@@ -27,10 +28,11 @@ syntax = ->
   console.log "    -j JOBS     : number of jobs (cores) ffmpeg is allowed to use"
   console.log "    -f FPS      : frames per second. Default: #{DEFAULT_FPS}"
   console.log "    -v FOV      : field of view, in degrees. Default: #{DEFAULT_FOV}"
+  console.log "    -p          : portrait (swaps width and height, adjusts FOV)"
   console.log "    -q QUALITY  : quality (passed directly to ffmpeg as -crf). Default: #{DEFAULT_CRF}"
   console.log "    -w S:STEP   : Instead of making a video, walk the video making snapshots every STEP seconds: S start"
   console.log "    -wd DIR     : walk snapshots dir (default: #{DEFAULT_WALK_DIR})"
-  console.log "    -wc         : cleanup any old snapshots in walk snapshots dir before adding any"
+  console.log "    -wk         : keep old snapshots in walk snapshots dir"
   console.log "    -d          : dry run (don't execute commands or touch files)"
 
 main = ->
@@ -55,7 +57,7 @@ main = ->
   crf = DEFAULT_CRF
   walkSnapshots = null
   walkDir = DEFAULT_WALK_DIR
-  walkCleanup = false
+  walkCleanup = true
 
   # argument parsing
   looks = []
@@ -78,6 +80,11 @@ main = ->
       fps = parseInt(args.shift())
     else if arg == '-v'
       fov = parseInt(args.shift())
+    else if arg == '-p'
+      tmp = dstW
+      dstW = dstH
+      dstH = tmp
+      fov = DEFAULT_ROTATED_FOV
     else if arg == '-q'
       crf = parseInt(args.shift())
     else if arg == '-t'
@@ -93,8 +100,8 @@ main = ->
       dstW = parseInt(args.shift())
     else if arg == '-dh'
       dstH = parseInt(args.shift())
-    else if arg == '-wc'
-      walkCleanup = true
+    else if arg == '-wk'
+      walkCleanup = false
     else if arg == '-l' # look
       rawYPR = args.shift()
       pieces = rawYPR.split(/:/) # Timestamp, Yaw, Pitch, Roll
@@ -138,9 +145,37 @@ main = ->
       yaw:   0
     looks.unshift startingLook
 
+  ffprobeEXE = __dirname + "/wbin/ffprobe.exe"
   if (srcW == 0) or (srcH == 0)
-    console.error "-sw and -sh are required"
-    process.exit()
+    ffprobeArgs = [
+      '-v'
+      'error'
+      '-select_streams'
+      'v:0'
+      '-show_entries'
+      'stream=width,height'
+      '-of'
+      'default=nw=1'
+      inputFilename
+    ]
+
+    console.log "Querying width and height: #{inputFilename}"
+    console.log ffprobeArgs
+    proc = spawnSync(ffprobeEXE, ffprobeArgs)
+
+    stdoutLines = String(proc.stdout).split(/\n/)
+    for line in stdoutLines
+      if matches = line.match(/width=(\d+)/)
+        srcW = parseInt(matches[1]) >> 1
+      if matches = line.match(/height=(\d+)/)
+        srcH = parseInt(matches[1])
+
+    if (srcW == 0) or (srcH == 0)
+      console.error "-sw and -sh are required"
+      process.exit(-1)
+
+    console.log "Choosing source dimensions: #{srcW}x#{srcH}"
+
 
   console.log "Reading [#{srcW}x#{srcH}]: #{inputFilename}"
   console.log "Writing [#{dstW}x#{dstH}]: #{outputFilename}"
@@ -153,15 +188,20 @@ main = ->
     looks = []
     end = walkSnapshots.start + 10000 # arbitrary
     for timestamp in [walkSnapshots.start..end] by walkSnapshots.step
+      lastOldLook = oldLooks[0]
       for oldLook in oldLooks
-        if timestamp <= oldLook.timestamp
+        # console.log oldLook
+        if timestamp < oldLook.timestamp
           break
+        lastOldLook = oldLook
       looks.push {
         timestamp: timestamp
-        roll:  oldLook.roll
-        pitch: oldLook.pitch
-        yaw:   oldLook.yaw
+        roll:  lastOldLook.roll
+        pitch: lastOldLook.pitch
+        yaw:   lastOldLook.yaw
       }
+    # console.log looks
+    # process.exit(0)
 
 
   # make a working dir and optionally a walk dir
