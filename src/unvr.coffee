@@ -58,6 +58,7 @@ main = ->
   walkSnapshots = null
   walkDir = DEFAULT_WALK_DIR
   walkCleanup = true
+  startFOV = fov
 
   # argument parsing
   looks = []
@@ -112,6 +113,7 @@ main = ->
         pitch: parseInt(pieces[1])
         yaw:   parseInt(pieces[2])
         roll:  parseInt(pieces[3])
+        fov:   fov
       looks.push look
     else
       if arg.charAt(0) == '-'
@@ -138,11 +140,14 @@ main = ->
   else if (testLookDuration == 0) and (looks[0].timestamp != 0)
     needsStartingLook = true
   if needsStartingLook
+    if looks.length > 0
+      startFOV = looks[0].fov
     startingLook =
       timestamp: 0
       roll:  0
       pitch: 0
       yaw:   0
+      fov:   startFOV
     looks.unshift startingLook
 
   ffprobeEXE = __dirname + "/wbin/ffprobe.exe"
@@ -181,7 +186,7 @@ main = ->
   console.log "Writing [#{dstW}x#{dstH}]: #{outputFilename}"
   console.log "Looks:"
   for look in looks
-    console.log " * T:#{look.timestamp} Y:#{look.yaw} P:#{look.pitch} R:#{look.roll}"
+    console.log " * T:#{look.timestamp} Y:#{look.yaw} P:#{look.pitch} R:#{look.roll} V:#{look.fov}"
 
   if walkSnapshots != null
     oldLooks = looks
@@ -199,6 +204,7 @@ main = ->
         roll:  lastOldLook.roll
         pitch: lastOldLook.pitch
         yaw:   lastOldLook.yaw
+        fov:   lastOldLook.fov
       }
     # console.log looks
     # process.exit(0)
@@ -243,11 +249,11 @@ main = ->
     else
       look.filename = "#{walkDir}\\T#{pad(look.timestamp, 6)}.tga"
 
-    if (lastLook == null) or (lastLook.yaw != look.yaw) or (lastLook.pitch != look.pitch) or (lastLook.roll != look.roll)
+    if (lastLook == null) or (lastLook.yaw != look.yaw) or (lastLook.pitch != look.pitch) or (lastLook.roll != look.roll) or (lastLook.fov != look.fov)
       lastLook = look
 
       # write out a nona config for creating the equirectangular -> rectilinear x/y projection remaps
-      nonaConfig = "p w#{dstW} h#{dstH} f0 v#{fov}\ni f4 r#{look.roll} p#{look.pitch} y#{look.yaw} v180 n\"lies.png\"\n"
+      nonaConfig = "p w#{dstW} h#{dstH} f0 v#{look.fov}\ni f4 r#{look.roll} p#{look.pitch} y#{look.yaw} v180 n\"lies.png\"\n"
       nonaConfigFilename = "unvr.tmp/nona.cfg"
       nonaArgs = ['-o', "unvr.tmp\\unvr_", '-c', nonaConfigFilename]
       console.log "Generating projection for look #{lookIndex} ..."

@@ -53,7 +53,7 @@
   };
 
   main = function() {
-    var arg, args, coloristEXE, concatFilename, concatString, crf, dryrun, dstH, dstW, duration, end, fakeSourceImageFilename, ffmpegArgs, ffmpegEXE, ffmpegFilter, ffprobeArgs, ffprobeEXE, filelist, filelistFilename, filename, filesToUnlink, fn, fov, fps, i, inputFilename, j, jobs, k, l, lastLook, lastOldLook, len, len1, len2, len3, len4, len5, line, look, lookIndex, looks, m, matches, n, needsStartingLook, nonaArgs, nonaConfig, nonaConfigFilename, nonaEXE, o, oldLook, oldLooks, onePass, outputFilename, pieces, proc, rawSS, rawYPR, ref, ref1, ref2, seconds, seekOffset, srcH, srcW, startingLook, stdoutLines, testLookDuration, timestamp, tmp, toUnlink, walkCleanup, walkDir, walkSnapshots;
+    var arg, args, coloristEXE, concatFilename, concatString, crf, dryrun, dstH, dstW, duration, end, fakeSourceImageFilename, ffmpegArgs, ffmpegEXE, ffmpegFilter, ffprobeArgs, ffprobeEXE, filelist, filelistFilename, filename, filesToUnlink, fn, fov, fps, i, inputFilename, j, jobs, k, l, lastLook, lastOldLook, len, len1, len2, len3, len4, len5, line, look, lookIndex, looks, m, matches, n, needsStartingLook, nonaArgs, nonaConfig, nonaConfigFilename, nonaEXE, o, oldLook, oldLooks, onePass, outputFilename, pieces, proc, rawSS, rawYPR, ref, ref1, ref2, seconds, seekOffset, srcH, srcW, startFOV, startingLook, stdoutLines, testLookDuration, timestamp, tmp, toUnlink, walkCleanup, walkDir, walkSnapshots;
     args = process.argv.slice(2);
     if (args.length < 1) {
       syntax();
@@ -75,6 +75,7 @@
     walkSnapshots = null;
     walkDir = DEFAULT_WALK_DIR;
     walkCleanup = true;
+    startFOV = fov;
     // argument parsing
     looks = [];
     while (arg = args.shift()) {
@@ -130,7 +131,8 @@
           timestamp: parseInt(pieces[0]),
           pitch: parseInt(pieces[1]),
           yaw: parseInt(pieces[2]),
-          roll: parseInt(pieces[3])
+          roll: parseInt(pieces[3]),
+          fov: fov
         };
         looks.push(look);
       } else {
@@ -167,11 +169,15 @@
       needsStartingLook = true;
     }
     if (needsStartingLook) {
+      if (looks.length > 0) {
+        startFOV = looks[0].fov;
+      }
       startingLook = {
         timestamp: 0,
         roll: 0,
         pitch: 0,
-        yaw: 0
+        yaw: 0,
+        fov: startFOV
       };
       looks.unshift(startingLook);
     }
@@ -202,7 +208,7 @@
     console.log("Looks:");
     for (j = 0, len1 = looks.length; j < len1; j++) {
       look = looks[j];
-      console.log(` * T:${look.timestamp} Y:${look.yaw} P:${look.pitch} R:${look.roll}`);
+      console.log(` * T:${look.timestamp} Y:${look.yaw} P:${look.pitch} R:${look.roll} V:${look.fov}`);
     }
     if (walkSnapshots !== null) {
       oldLooks = looks;
@@ -222,7 +228,8 @@
           timestamp: timestamp,
           roll: lastOldLook.roll,
           pitch: lastOldLook.pitch,
-          yaw: lastOldLook.yaw
+          yaw: lastOldLook.yaw,
+          fov: lastOldLook.fov
         });
       }
     }
@@ -278,10 +285,10 @@
       } else {
         look.filename = `${walkDir}\\T${pad(look.timestamp, 6)}.tga`;
       }
-      if ((lastLook === null) || (lastLook.yaw !== look.yaw) || (lastLook.pitch !== look.pitch) || (lastLook.roll !== look.roll)) {
+      if ((lastLook === null) || (lastLook.yaw !== look.yaw) || (lastLook.pitch !== look.pitch) || (lastLook.roll !== look.roll) || (lastLook.fov !== look.fov)) {
         lastLook = look;
         // write out a nona config for creating the equirectangular -> rectilinear x/y projection remaps
-        nonaConfig = `p w${dstW} h${dstH} f0 v${fov}\ni f4 r${look.roll} p${look.pitch} y${look.yaw} v180 n"lies.png"\n`;
+        nonaConfig = `p w${dstW} h${dstH} f0 v${look.fov}\ni f4 r${look.roll} p${look.pitch} y${look.yaw} v180 n"lies.png"\n`;
         nonaConfigFilename = "unvr.tmp/nona.cfg";
         nonaArgs = ['-o', "unvr.tmp\\unvr_", '-c', nonaConfigFilename];
         console.log(`Generating projection for look ${lookIndex} ...`);
